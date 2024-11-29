@@ -1,9 +1,11 @@
 import torch
 import torch.cuda
 import torchvision
+from PIL import Image
 # from torch import T
 from torch import nn
-from torch.nn import Sequential, Linear, ReLU, Dropout, Sigmoid, BCELoss
+from torch.ao.nn.quantized import Softmax
+from torch.nn import Sequential, Linear, ReLU, Dropout, BCELoss
 from torch.optim import Optimizer
 from torchvision import transforms
 from torchvision.transforms import Lambda
@@ -28,24 +30,24 @@ class torch_nn(nn.Module):
         self.transform_func2 = Lambda(lambda y: torch.zeros(
             10, dtype=torch.float32).scatter_(dim=0, index=torch.tensor(y), value=1))
         self.transform_func3 = transforms.Compose([
+            transforms.Grayscale(),
+            transforms.Resize((28, 28)),
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
-            transforms.Normalize([0.5], [0.5])
+            transforms.Normalize((0.5,), (0.5,))
         ])
         self.create_model()
         self.create_optim()
 
     def create_model(self, dropout_rate=0.25, is_static: bool = False):
         self.model = Sequential(
-            Linear(28 * 28, 256),
-            ReLU(),  # D
-            Linear(256, 128),
+            Linear(784, 512),
             ReLU(),
-            Linear(128, 32),
+            Linear(512, 256),
             ReLU(),
-            Linear(32, 1),
+            Linear(120, 10),
             Dropout(p=dropout_rate),
-            Sigmoid()).to(self.device)
+            Softmax()).to(self.device)
         if is_static:
             return self.model
 
@@ -60,30 +62,34 @@ class torch_nn(nn.Module):
         second binary_test_loader
         :return: binary_train, binary_test
         """
-        train_set = torchvision.datasets.FashionMNIST(
-            root=root,
-            train=True,
-            download=isdownload_dataset,
-            transform=self.transform_func3)
-        test_set = torchvision.datasets.FashionMNIST(root=root,
-                                                     train=False, download=isdownload_dataset,
-                                                     transform=self.transform_func3)
-        binary_train_set = [x for x in train_set if x[1] in [0, 9]]
-        binary_test_set = [x for x in test_set if x[1] in [0, 9]]
-        binary_train_loader = torch.utils.data.DataLoader(
-            binary_train_set,
-            batch_size=batch_size,
-            shuffle=shuffle_sets)
-        binary_test_loader = torch.utils.data.DataLoader(
-            binary_test_set,
-            batch_size=batch_size, shuffle=shuffle_sets)
+        try:
+            train_set = torchvision.datasets.MNIST(
+                root=root,
+                train=True,
+                download=isdownload_dataset,
+                transform=self.transform_func3)
 
-        return binary_train_loader, binary_test_loader
+            test_set = torchvision.datasets.MNIST(root=root,
+                                                  train=False, download=isdownload_dataset,
+                                                  transform=self.transform_func3)
+            binary_train_set = [x for x in train_set if x[1] in [0, 9]]
+            binary_test_set = [x for x in test_set if x[1] in [0, 9]]
+            binary_train_loader = torch.utils.data.DataLoader(
+                binary_train_set,
+                batch_size=batch_size,
+                shuffle=shuffle_sets)
+            binary_test_loader = torch.utils.data.DataLoader(
+                binary_test_set,
+                batch_size=batch_size, shuffle=shuffle_sets)
+            return binary_train_loader, binary_test_loader
 
-    def train_modele(self, data_loader, epochs=50, after_train_save: bool = False):
-        for i in range(epochs):  # A
+        except RuntimeError:
+            print("Datasets are not loaded, set True to download")
+
+    def train_model(self, data_loader, epochs=50, after_train_save: bool = False):
+        for i in range(epochs):
             tloss = 0
-            for n, (imgs, labels) in enumerate(data_loader):
+            for imgs, labels in data_loader:
                 imgs = imgs.reshape(-1, 28 * 28)
                 imgs = imgs.to(self.device)
                 labels = torch.FloatTensor(
@@ -95,7 +101,7 @@ class torch_nn(nn.Module):
                 loss.backward()
                 self.optimizer.step()
                 tloss += loss
-            tloss = tloss / n
+            tloss = tloss / labels
             print(f"at epoch {i}, loss is {tloss}")
             if after_train_save:
                 self.save_model('.')
@@ -106,12 +112,21 @@ class torch_nn(nn.Module):
         print("model save on path ", path)
 
     def load_model(self, load_path: str):
-        state_dict = torch.load(load_path + self.model_name + self.ext)
+        state_dict = torch.load(load_path + self.model_name + self.ext, weights_only=True)
         loaded_model = torch_nn()
-        loaded_model.load_state_dict(state_dict)
+        if 'module.' in next(iter(state_dict.keys())):
+            state_dict = {k.replace('module.', ''):
+                              v for k, v in state_dict.items()}
+        loaded_model.load_state_dict(state_dict, strict=False)
         loaded_model.eval()
         print("model loaded and ready")
         return loaded_model
 
     def predict(self, image_path: str):
-        pass
+        print("Net thinks that ")
+        with torch.no_grad():
+            image = Image.open(image_path)
+            image = self.transform_func3(image).unsqueeze(0)  # Добавление размерности батча
+            output = self.model(image)
+            _, predicted = torch.max(output.data, 1)
+            return predicted.item()
