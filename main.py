@@ -1,6 +1,6 @@
-from core.entities.TorchNet import torch_nn, get_save_path
+from core.entities.TorchNet import Torch_nn, get_save_path
 
-tnet: torch_nn = torch_nn()
+tnet: Torch_nn = Torch_nn()
 
 three_pic = 'core/data/three.png'
 model_save_path = get_save_path()
@@ -12,7 +12,7 @@ def load():
 
 
 def after_load_train():
-    train_dl = tnet.get_data_loaders(isdownload_dataset=True)[0]
+    train_dl = tnet.get_data_loaders(is_download_dataset=True)[0]
     tnet.train_model(train_dl, after_train_save=True)
 
 
@@ -22,8 +22,8 @@ def predict_numbers(path_to_pic: str):
 
 def main_logic():
     global tnet
-    tnet = torch_nn()
-    data_loaders = tnet.get_data_loaders(root='../core/data', isdownload_dataset=True)
+    tnet = Torch_nn()
+    data_loaders = tnet.get_data_loaders(root='../core/data', is_download_dataset=True)
 
     train_dataloader = data_loaders[0]
     test_dataloader = data_loaders[1]
